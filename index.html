@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoiceRoute</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Calibri, Arial, sans-serif; background: #f4f5f9; color: #14213d; }
+  header { background: #14213d; color: white; padding: 24px 20px; text-align: center; }
+  header h1 { margin: 0; font-size: 34px; }
+  header p { margin: 6px 0 0; color: #2ec4b6; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .card { background: white; border: 1px solid #e0e2e8; border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+  .card h2 { margin: 0 0 12px; font-size: 20px; color: #0f7b6c; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 160px; padding: 10px; font-size: 16px; border: 1px solid #c5c8d0; border-radius: 8px; }
+  button { padding: 10px 16px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; background: #14213d; color: white; }
+  button:hover { background: #22345f; }
+  button.mic { background: #0f7b6c; }
+  button.mic.on { background: #d62828; }
+  button.red { background: #d62828; }
+  button.seat { background: #e8eaf0; color: #14213d; }
+  button.seat.chosen { background: #0f7b6c; color: white; }
+  .hint { color: #5b6275; font-size: 14px; margin-top: 8px; }
+  .option { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+            border: 1px solid #e0e2e8; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .option b { font-size: 18px; }
+  .small { color: #5b6275; font-size: 14px; }
+  .ticket { background: #e6f6f3; border: 2px dashed #0f7b6c; border-radius: 10px; padding: 14px; margin-top: 12px; }
+  .ticket h3 { margin: 0 0 6px; color: #0f7b6c; }
+  #log { max-height: 200px; overflow-y: auto; font-size: 15px; }
+  #log div { padding: 3px 0; }
+  .sys { color: #0f7b6c; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VoiceRoute</h1>
+  <p>Voice-controlled transport enquiry and ticket booking</p>
+</header>
+
+<main>
+
+  <!-- 1. Search by voice or typing -->
+  <div class="card">
+    <h2>1. Where do you want to go?</h2>
+    <div class="row">
+      <button class="mic" id="micButton" onclick="startVoice()">🎤 Speak</button>
+      <input id="commandBox" placeholder="Say or type: Dhaka to Khulna">
+      <button onclick="typedCommand()">Search</button>
+    </div>
+    <div class="hint">
+      Voice commands: "Dhaka to Khulna" &nbsp;|&nbsp; "book option 2" &nbsp;|&nbsp; "window" / "aisle" &nbsp;|&nbsp;
+      "view booking 5" &nbsp;|&nbsp; "cancel booking 5"
+    </div>
+    <div class="hint" id="micWarning"></div>
+  </div>
+
+  <!-- 2. Results -->
+  <div class="card hidden" id="resultsCard">
+    <h2>2. Available transport</h2>
+    <div id="results"></div>
+  </div>
+
+  <!-- 3. Booking panel -->
+  <div class="card hidden" id="bookingCard">
+    <h2>3. Book your seat</h2>
+    <p id="pickedInfo"></p>
+    <div class="row">
+      <button class="seat" id="windowButton" onclick="chooseSeat('window')">Window</button>
+      <button class="seat" id="aisleButton" onclick="chooseSeat('aisle')">Aisle</button>
+    </div>
+    <br>
+    <div class="row">
+      <input id="nameBox" placeholder="Passenger name">
+      <button class="mic" onclick="nameVoice()">🎤 Say name</button>
+      <button onclick="confirmBooking()">Confirm booking</button>
+    </div>
+    <div id="ticket"></div>
+  </div>
+
+  <!-- 4. View / cancel -->
+  <div class="card">
+    <h2>My booking</h2>
+    <div class="row">
+      <input id="bookingNumber" type="number" placeholder="Booking number">
+      <button onclick="viewBooking()">View</button>
+      <button class="red" onclick="cancelBooking()">Cancel booking</button>
+    </div>
+    <div id="viewResult"></div>
+  </div>
+
+  <!-- Conversation log -->
+  <div class="card">
+    <h2>Conversation</h2>
+    <div id="log"></div>
+  </div>
+
+</main>
+
+<script>
+// ---------- variables ----------
+var results = [];      // the options found by the last search
+var lastSearch = '';   // the last search text (used to refresh seat counts)
+var picked = null;     // the option chosen for booking
+var seatType = '';     // 'window' or 'aisle'
+
+var numberWords = {one: 1, won: 1, first: 1, two: 2, second: 2, three: 3, third: 3,
+                   four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10};
+
+var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+  document.getElementById('micWarning').innerText =
+    'Your browser has no speech recognition. Please use Google Chrome, or type your commands.';
+}
+
+
+// ---------- small helper functions ----------
+
+function $(id) { return document.getElementById(id); }
+
+function addLog(who, text) {
+  var log = $('log');
+  var css = (who == 'System') ? 'sys' : '';
+  log.innerHTML += '<div class="' + css + '"><b>' + who + ':</b> ' + text + '</div>';
+  log.scrollTop = log.scrollHeight;
+}
+
+function speak(text) {
+  addLog('System', text);
+  window.speechSynthesis.cancel();
+  var voice = new SpeechSynthesisUtterance(text);
+  voice.rate = 0.95;
+  window.speechSynthesis.speak(voice);
+}
+
+function listen(whenDone) {
+  // listens once, then calls whenDone(text)
+  if (!SpeechRecognition) {
+    speak('Speech recognition is not supported in this browser. Please type instead.');
+    return;
+  }
+  var r = new SpeechRecognition();
+  r.lang = 'en-IN';   // works better for South Asian accents
+  r.onstart = function () { $('micButton').classList.add('on'); $('micButton').innerText = '🎤 Listening...'; };
+  r.onend = function () { $('micButton').classList.remove('on'); $('micButton').innerText = '🎤 Speak'; };
+  r.onresult = function (event) { whenDone(event.results[0][0].transcript.toLowerCase()); };
+  r.onerror = function (event) { addLog('Error', 'could not hear you (' + event.error + ')'); };
+  window.speechSynthesis.cancel();   // stop talking so the mic does not hear the speaker
+  r.start();
+}
+
+function post(url, data) {
+  return fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).then(function (res) { return res.json(); });
+}
+
+function getNumber(text) {
+  var words = text.split(' ');
+  // first: real digits
+  for (var i = 0; i < words.length; i++) {
+    if (/^\d+$/.test(words[i])) return parseInt(words[i]);
+  }
+  // second: clear number words
+  for (var i = 0; i < words.length; i++) {
+    if (numberWords[words[i]]) return numberWords[words[i]];
+  }
+  // last: confusing words ('to' / 'for' are often 'two' / 'four')
+  for (var i = 0; i < words.length; i++) {
+    if (words[i] == 'to' || words[i] == 'too') return 2;
+    if (words[i] == 'for') return 4;
+  }
+  return 0;
+}
+
+function titleCase(text) {
+  return text.replace(/\w\S*/g, function (w) { return w[0].toUpperCase() + w.slice(1); });
+}
+
+
+// ---------- voice / typed commands ----------
+
+function startVoice() { listen(handleCommand); }
+
+function typedCommand() {
+  var text = $('commandBox').value.toLowerCase().trim();
+  if (text != '') handleCommand(text);
+}
+
+function handleCommand(text) {
+  $('commandBox').value = text;
+  addLog('You', text);
+
+  // 1. choosing the seat type while the booking panel is open
+  if (picked != null && text.includes('window')) { chooseSeat('window'); return; }
+  if (picked != null && (text.includes('aisle') || text.includes('isle') || text.includes("i'll"))) { chooseSeat('aisle'); return; }
+
+  // 2. view or cancel a booking
+  if (text.includes('booking') && text.includes('cancel')) {
+    $('bookingNumber').value = getNumber(text);
+    cancelBooking();
+    return;
+  }
+  if (text.includes('booking') && (text.includes('view') || text.includes('check') || text.includes('show'))) {
+    $('bookingNumber').value = getNumber(text);
+    viewBooking();
+    return;
+  }
+
+  // 3. book one of the options, for example "book option 2"
+  if (text.includes('option') && results.length > 0) {
+    var number = getNumber(text);
+    if (number >= 1 && number <= results.length) {
+      openBooking(number - 1);
+    } else {
+      speak('Sorry, I did not understand the option number.');
+    }
+    return;
+  }
+
+  // 4. otherwise it is a route search
+  doSearch(text, false);
+}
+
+
+// ---------- search ----------
+
+function doSearch(text, quiet) {
+  post('/api/search', {text: text}).then(function (data) {
+    if (!data.ok) {
+      if (!quiet) speak(data.message);
+      return;
+    }
+    lastSearch = text;
+    results = data.results;
+    showResults();
+    if (quiet) return;
+
+    if (results.length == 0) {
+      speak('No transport found.');
+      return;
+    }
+    var message = 'Searching from ' + data.from + ' to ' + data.to + '. ';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      message += 'Option ' + (i + 1) + '. ' + r.type + ' ' + r.name + ' at ' + r.time +
+                 '. Fare ' + r.fare + ' taka. ' + r.window + ' window seats and ' +
+                 r.aisle + ' aisle seats left. ';
+    }
+    message += 'Say book option, and the number, or click Book.';
+    speak(message);
+  });
+}
+
+function showResults() {
+  var html = '';
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    html += '<div class="option">' +
+            '<div><b>Option ' + (i + 1) + ': ' + r.name + '</b> (' + r.type + ')<br>' +
+            '<span class="small">' + r.time + ' &nbsp;|&nbsp; ' + r.fare + ' taka &nbsp;|&nbsp; ' +
+            r.window + ' window, ' + r.aisle + ' aisle seats left</span></div>' +
+            '<button onclick="openBooking(' + i + ')">Book</button></div>';
+  }
+  if (results.length == 0) html = 'No transport found.';
+  $('results').innerHTML = html;
+  $('resultsCard').classList.remove('hidden');
+}
+
+
+// ---------- booking ----------
+
+function openBooking(index) {
+  picked = results[index];
+  seatType = '';
+  $('windowButton').classList.remove('chosen');
+  $('aisleButton').classList.remove('chosen');
+  $('ticket').innerHTML = '';
+  $('nameBox').value = '';
+  $('pickedInfo').innerText = 'Option ' + (index + 1) + ': ' + picked.name + ' at ' + picked.time +
+                              ', fare ' + picked.fare + ' taka.';
+  $('bookingCard').classList.remove('hidden');
+  $('bookingCard').scrollIntoView({behavior: 'smooth'});
+
+  if (picked.window + picked.aisle == 0) {
+    speak('Sorry, no seats are available.');
+    picked = null;
+    return;
+  }
+  speak('Say window or aisle for your seat.');
+}
+
+function chooseSeat(type) {
+  if (picked == null) return;
+  if (picked[type] == 0) {
+    speak('Sorry, no ' + type + ' seats are left.');
+    return;
+  }
+  seatType = type;
+  $('windowButton').classList.toggle('chosen', type == 'window');
+  $('aisleButton').classList.toggle('chosen', type == 'aisle');
+  speak(type + ' seat selected. Please type your name, or press Say name.');
+}
+
+function nameVoice() {
+  listen(function (text) {
+    $('nameBox').value = titleCase(text);
+    addLog('You', text);
+    speak('Your name is ' + titleCase(text) + '. Press Confirm booking.');
+  });
+}
+
+function confirmBooking() {
+  if (picked == null) return;
+  if (seatType == '') { speak('Please choose a window or aisle seat first.'); return; }
+  if ($('nameBox').value.trim() == '') { speak('Please enter your name.'); return; }
+
+  post('/api/book', {
+    schedule_id: picked.schedule_id,
+    seat_type: seatType,
+    name: $('nameBox').value
+  }).then(function (data) {
+    if (!data.ok) { speak(data.message); return; }
+    var b = data.booking;
+    $('ticket').innerHTML = '<div class="ticket"><h3>Ticket confirmed</h3>' +
+      'Booking number: <b>' + b.booking_id + '</b><br>' +
+      'Passenger: ' + b.name + '<br>' +
+      b.transport + ' at ' + b.time + '<br>' +
+      b.seat_type + ' seat number ' + b.seat_number + '<br>' +
+      'Fare: ' + b.fare + ' taka</div>';
+    speak('Ticket confirmed for ' + b.name + '. ' + b.seat_type + ' seat number ' +
+          b.seat_number + '. Your booking number is ' + b.booking_id + '.');
+    picked = null;
+    doSearch(lastSearch, true);   // refresh the seat counts quietly
+  });
+}
+
+
+// ---------- view and cancel ----------
+
+function viewBooking() {
+  var id = $('bookingNumber').value;
+  if (id == '' || id == 0) { speak('Please enter your booking number.'); return; }
+  post('/api/view', {booking_id: id}).then(function (data) {
+    if (!data.ok) { $('viewResult').innerHTML = ''; speak(data.message); return; }
+    var b = data.booking;
+    $('viewResult').innerHTML = '<div class="ticket"><h3>Booking ' + b.booking_id + '</h3>' +
+      b.name + ' on ' + b.transport + ' at ' + b.time + '<br>' +
+      b.seat_type + ' seat number ' + b.seat_number + ' | Fare ' + b.fare + ' taka</div>';
+    speak(b.name + ', you are booked on ' + b.transport + ' at ' + b.time + '. ' +
+          b.seat_type + ' seat number ' + b.seat_number + '. Fare is ' + b.fare + ' taka.');
+  });
+}
+
+function cancelBooking() {
+  var id = $('bookingNumber').value;
+  if (id == '' || id == 0) { speak('Please enter your booking number.'); return; }
+  if (!confirm('Cancel booking number ' + id + '?')) return;
+  post('/api/cancel', {booking_id: id}).then(function (data) {
+    speak(data.message);
+    if (data.ok) {
+      $('viewResult').innerHTML = '';
+      if (lastSearch != '') doSearch(lastSearch, true);   // refresh the seat counts
+    }
+  });
+}
+
+// pressing Enter in the command box searches
+$('commandBox').addEventListener('keydown', function (e) { if (e.key == 'Enter') typedCommand(); });
+</script>
+</body>
+</html>
