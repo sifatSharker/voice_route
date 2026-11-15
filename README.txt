@@ -19,3 +19,23 @@ How to run (VS Code terminal):
 Notes:
   - Voice needs Chrome or Edge and an internet connection (browser speech recognition).
   - In other browsers you can still type the commands.
+
+
+Deploying to Render
+===================
+1. Make an online MySQL database (free options: Aiven or TiDB Cloud).
+   Render itself does not offer MySQL.
+2. On your computer, load the tables into that online database once.
+   In the VS Code terminal (PowerShell):
+     $env:DB_HOST="your-host"
+     $env:DB_PORT="your-port"
+     $env:DB_USER="your-user"
+     $env:DB_PASSWORD="your-password"
+     $env:DB_NAME="your-database-name"
+     python setup_db.py
+3. Push this folder to GitHub (app.py must be in the repo root, or set Root Directory).
+4. Render -> New -> Web Service, then:
+     Build Command: pip install -r requirements.txt
+     Start Command: gunicorn app:app
+5. In Render -> Environment, add DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
+   with the same values as step 2. Then deploy.

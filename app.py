@@ -1,3 +1,4 @@
+import os
 import difflib
 import mysql.connector
 from flask import Flask, render_template, request, jsonify
@@ -23,11 +24,14 @@ station_fixes = {
 
 def get_db():
     # opens a new connection for every request
+    # On Render the values come from Environment Variables.
+    # On your own computer the second value (after the comma) is used (XAMPP).
     return mysql.connector.connect(
-        host='localhost',
-        user='root',
-        password='',          # XAMPP's default is an empty password
-        database='voiceroute')
+        host=os.environ.get('DB_HOST', 'localhost'),
+        port=int(os.environ.get('DB_PORT', '3306')),
+        user=os.environ.get('DB_USER', 'root'),
+        password=os.environ.get('DB_PASSWORD', ''),   # XAMPP's default is an empty password
+        database=os.environ.get('DB_NAME', 'voiceroute'))
 
 
 def find_stations(text, cur):

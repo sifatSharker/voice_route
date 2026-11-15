@@ -1,11 +1,25 @@
+import os
 import mysql.connector
 
-conn = mysql.connector.connect(host='localhost', user='root', password='')
-cur = conn.cursor()
+# On Render / online database: values come from Environment Variables.
+# On your own computer (XAMPP): the second value (after the comma) is used.
+host = os.environ.get('DB_HOST', 'localhost')
+port = int(os.environ.get('DB_PORT', '3306'))
+user = os.environ.get('DB_USER', 'root')
+password = os.environ.get('DB_PASSWORD', '')
+db_name = os.environ.get('DB_NAME', 'voiceroute')
 
-# create the database and use it
-cur.execute('CREATE DATABASE IF NOT EXISTS voiceroute')
-cur.execute('USE voiceroute')
+if host == 'localhost':
+    # XAMPP: connect first, then create the database
+    conn = mysql.connector.connect(host=host, port=port, user=user, password=password)
+    cur = conn.cursor()
+    cur.execute('CREATE DATABASE IF NOT EXISTS ' + db_name)
+    cur.execute('USE ' + db_name)
+else:
+    # online database: it already exists, so connect to it directly
+    conn = mysql.connector.connect(host=host, port=port, user=user,
+                                   password=password, database=db_name)
+    cur = conn.cursor()
 
 # delete old tables so this file can be run again to reset the data
 cur.execute('DROP TABLE IF EXISTS Booking')
